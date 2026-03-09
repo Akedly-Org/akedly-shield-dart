@@ -100,6 +100,6 @@ valid = hash.startsWith("0" * difficulty)         // leading hex zeros
 
 ## Related Packages
 
-- **JavaScript**: [`@akedly/shield`](../js/)
-- **Swift (iOS)**: [`AkedlyShield`](../swift/)
-- **Kotlin (Android)**: [`com.akedly.shield`](../kotlin/)
+- **JavaScript**: [`@akedly/shield`](https://www.npmjs.com/package/@akedly/shield)
+- **Swift (iOS)**: [`AkedlyShield`](https://github.com/Akedly-Org/akedly-shield-swift)
+- **Kotlin (Android)**: [`com.akedly.shield`](https://github.com/Akedly-Org/akedly-shield-kotlin)
