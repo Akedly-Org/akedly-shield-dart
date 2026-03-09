@@ -1,0 +1,15 @@
+name: akedly_shield
+description: Client-side PoW solver and Turnstile helper for Akedly Shield V1.2.
+version: 1.0.0
+repository: https://github.com/AkedlyIO/akedly-shield
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+  flutter: '>=3.10.0'
+
+dependencies:
+  crypto: ^3.0.0
+  webview_flutter: ^4.0.0
+
+dev_dependencies:
+  test: ^1.24.0
