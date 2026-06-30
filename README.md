@@ -274,6 +274,27 @@ Map<String, dynamic>? verifyAkedlyResult(String token, String apiKey) {
 
 Treat the token like a one-time auth code: short-lived (~10 min) and accepted once.
 
+### Local vs on-device testing
+
+`ceremonyOrigin` decides which auth-gateway runs the WebAuthn ceremony — and therefore the
+relying-party (RP) ID the passkey binds to. Pass `ceremonyOrigin: 'http://localhost:5174'` for
+local development (RP=`localhost`, accepted by simulators/emulators); omit it on real devices to
+use prod (`https://auth.akedly.io`, RP=`akedly.io`) — a `localhost` RP cannot bind on a physical
+device.
+
+- **iOS Simulator.** Run **iOS 16+** signed into iCloud (Simulator → Settings → sign in) so the
+  platform authenticator can create/use passkeys; it reaches the host's `localhost` directly.
+- **Android Emulator.** Use an image **with Google Play Services** and a configured **screen
+  lock** — Credential Manager refuses without one. The emulator's `localhost` is the emulator
+  itself, so tunnel the host with `adb reverse tcp:5174 tcp:5174` (and `tcp:4100` for your token
+  backend) to keep the ceremony origin on `localhost`. Don't set `ceremonyOrigin` to `10.0.2.2` —
+  over plain HTTP it isn't a trustworthy WebAuthn origin and binds the passkey to the wrong RP
+  (`10.0.2.2` is fine for the token backend, not the ceremony).
+
+> There is a full end-to-end V1.2 sandbox — web plus all four mobile SDK reference apps, with a
+> headless Playwright + Chrome virtual-authenticator gate — for exercising this loop without a
+> physical device.
+
 ### Without the SDK (open the page yourself)
 
 `AkedlyPasskey` is a thin wrapper over `flutter_web_auth_2`. The ceremony is just a
