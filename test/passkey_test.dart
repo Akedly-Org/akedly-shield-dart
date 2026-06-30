@@ -44,4 +44,15 @@ void main() {
     expect(r.resultToken, isNull);
     expect(r.reason, equals('no_proof'));
   });
+
+  test('verified=true with a whitespace-only resultToken is not trusted', () {
+    final r = AkedlyPasskey.parseResultFromQuery('verified=true&resultToken=%20%20');
+    expect(r.verified, isFalse);
+    expect(r.reason, equals('no_proof'));
+  });
+
+  test('a malformed query encoding is a failed result, not a crash', () {
+    final r = AkedlyPasskey.parseResultFromQuery('verified=%&resultToken=pkrt1.a.b');
+    expect(r.verified, isFalse);
+  });
 }

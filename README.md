@@ -211,7 +211,8 @@ export function verifyAkedlyResult(token, apiKey) {
   if (expected.length !== given.length || !crypto.timingSafeEqual(expected, given)) return null;
   const payload = JSON.parse(Buffer.from(data, 'base64url').toString());
   if (!payload.exp || Date.now() > payload.exp) return null;        // expired
-  return payload; // { verified, purpose, transactionId, pipelineId, ... } — trust it
+  if (payload.verified !== true) return null;                       // only a verified outcome is trustworthy
+  return payload; // verified + unexpired — the caller MUST still bind payload.transactionId to the ceremony it started
 }
 ```
 
@@ -234,6 +235,7 @@ bool _constantTimeEquals(List<int> a, List<int> b) {
 }
 
 Map<String, dynamic>? verifyAkedlyResult(String token, String apiKey) {
+  if (apiKey.isEmpty) return null;                             // fail closed: never HMAC under an empty key
   const prefix = 'pkrt1.';
   if (!token.startsWith(prefix)) return null;
   final segments = token.substring(prefix.length).split('.');
@@ -258,7 +260,8 @@ Map<String, dynamic>? verifyAkedlyResult(String token, String apiKey) {
   } on FormatException {
     return null;
   }
-  if (DateTime.now().millisecondsSinceEpoch > (payload['exp'] as num)) return null; // expired
+  final exp = payload['exp'];
+  if (exp is! num || DateTime.now().millisecondsSinceEpoch > exp) return null; // missing/invalid or expired
   return payload; // { verified, purpose, transactionId, pipelineId, ... }
 }
 

@@ -85,15 +85,26 @@ class AkedlyPasskey {
     }
   }
 
-  /// Parse the deep-link redirect [uri] into a result.
-  static AkedlyPasskeyResult parseResult(Uri uri) =>
-      _fromParams(uri.queryParameters);
+  /// Parse the deep-link redirect [uri] into a result. `uri.queryParameters` throws a
+  /// FormatException on malformed percent-encoding (e.g. `verified=%`); since this is a public
+  /// parser fed external redirect input, a malformed query is a failed result, not a crash.
+  static AkedlyPasskeyResult parseResult(Uri uri) {
+    try {
+      return _fromParams(uri.queryParameters);
+    } on FormatException {
+      return const AkedlyPasskeyResult(verified: false, reason: 'failed');
+    }
+  }
 
   /// Parse a result from a raw `key=value&…` query string. Pure (no platform
   /// deps) so it is unit-testable; [parseResult] is the `Uri` convenience.
   static AkedlyPasskeyResult parseResultFromQuery(String query) {
     final q = query.startsWith('?') ? query.substring(1) : query;
-    return _fromParams(Uri.splitQueryString(q));
+    try {
+      return _fromParams(Uri.splitQueryString(q));
+    } on FormatException {
+      return const AkedlyPasskeyResult(verified: false, reason: 'failed');
+    }
   }
 
   // Enforces the contract that a `verified` outcome MUST carry the offline-verifiable
@@ -103,7 +114,7 @@ class AkedlyPasskey {
   static AkedlyPasskeyResult _fromParams(Map<String, String> p) {
     final claimed = p['verified'] == 'true';
     final token = p['resultToken'];
-    final verified = claimed && token != null && token.isNotEmpty;
+    final verified = claimed && token != null && token.trim().isNotEmpty;
     return AkedlyPasskeyResult(
       verified: verified,
       purpose: p['purpose'],
