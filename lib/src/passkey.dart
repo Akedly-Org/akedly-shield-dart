@@ -22,6 +22,7 @@ class AkedlyPasskeyResult {
   final String? resultToken;
 
   /// null when verified; else "closed" | "ineligible" | "start_failed" |
+  /// "no_proof" (verified with no result token) | "failed" (unparseable callback) |
   /// &lt;server code&gt;.
   final String? reason;
 
@@ -72,7 +73,15 @@ class AkedlyPasskey {
         url: url,
         callbackUrlScheme: callbackScheme,
       );
-      return parseResult(Uri.parse(callback));
+      // A malformed return URL (e.g. an illegal percent-escape in the path) is a PARSE failure,
+      // not a setup failure: use Uri.tryParse (returns null instead of throwing FormatException)
+      // and bucket it as 'failed' to match the query parsers below — don't let the broad catch
+      // mislabel it 'start_failed'.
+      final uri = Uri.tryParse(callback);
+      if (uri == null) {
+        return const AkedlyPasskeyResult(verified: false, reason: 'failed');
+      }
+      return parseResult(uri);
     } on PlatformException catch (e) {
       // flutter_web_auth_2 throws code 'CANCELED' when the user dismisses the sheet; any
       // other platform error (no browser/Custom Tab handler, native auth-session failure)
