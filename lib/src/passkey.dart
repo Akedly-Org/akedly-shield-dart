@@ -94,13 +94,17 @@ class AkedlyPasskey {
     }
   }
 
-  /// Parse the deep-link redirect [uri] into a result. `uri.queryParameters` throws a
-  /// FormatException on malformed percent-encoding (e.g. `verified=%`); since this is a public
-  /// parser fed external redirect input, a malformed query is a failed result, not a crash.
+  /// Parse the deep-link redirect [uri] into a result. `Uri.parse`/`tryParse` normalize a lone
+  /// `%` to `%25`, but query decoding can still fail on crafted input: the percent decoder throws
+  /// ArgumentError on a malformed escape (e.g. `%G1`) and FormatException on invalid UTF-8 bytes
+  /// (e.g. `%FF`). Since this is a public parser fed external redirect input, a malformed query
+  /// is a failed result, not a crash.
   static AkedlyPasskeyResult parseResult(Uri uri) {
     try {
       return _fromParams(uri.queryParameters);
     } on FormatException {
+      return const AkedlyPasskeyResult(verified: false, reason: 'failed');
+    } on ArgumentError {
       return const AkedlyPasskeyResult(verified: false, reason: 'failed');
     }
   }
@@ -112,6 +116,8 @@ class AkedlyPasskey {
     try {
       return _fromParams(Uri.splitQueryString(q));
     } on FormatException {
+      return const AkedlyPasskeyResult(verified: false, reason: 'failed');
+    } on ArgumentError {
       return const AkedlyPasskeyResult(verified: false, reason: 'failed');
     }
   }

@@ -6,7 +6,7 @@ Client-side PoW solver and Turnstile helper for Akedly Shield V1.2 (Dart/Flutter
 
 ```yaml
 dependencies:
-  akedly_shield: ^1.0.0
+  akedly_shield: ^1.1.0
 ```
 
 ## Quick Start
@@ -134,9 +134,32 @@ To **enroll** a passkey, pass the `enrollmentToken` from a successful OTP `/veri
 as the `token` instead — the API is identical; enrollment is proven on the next
 successful sign-in.
 
-You must register the callback scheme per platform once (the standard
-`flutter_web_auth_2` setup): an `<intent-filter>` for `myapp` on Android, and
-`CFBundleURLSchemes` in `Info.plist` on iOS.
+You must register the callback scheme once on Android (the standard
+`flutter_web_auth_2` 3.x setup); iOS needs no setup.
+
+The `callbackScheme` **must be lowercase** (`flutter_web_auth_2` validates it against
+`^[a-z][a-z\d+.-]*$`); a mixed-case scheme is rejected by the plugin and surfaces as a
+`start_failed` result.
+
+**Android** — declare the intent filter on the **plugin's** `CallbackActivity` (not your
+`MainActivity`) in `android/app/src/main/AndroidManifest.xml`, with your scheme in
+`android:scheme`:
+
+```xml
+<activity
+    android:name="com.linusu.flutter_web_auth_2.CallbackActivity"
+    android:exported="true">
+  <intent-filter android:label="flutter_web_auth_2">
+    <action android:name="android.intent.action.VIEW" />
+    <category android:name="android.intent.category.DEFAULT" />
+    <category android:name="android.intent.category.BROWSABLE" />
+    <data android:scheme="myapp" />
+  </intent-filter>
+</activity>
+```
+
+**iOS** — no setup required: `ASWebAuthenticationSession` receives the callback scheme
+directly, so no `CFBundleURLSchemes` entry is needed.
 
 ### Verify the result (seamless — no polling)
 
@@ -160,10 +183,10 @@ pkrt1.<base64url(payloadJSON)>.<base64url(signature)>
 
 ```json
 { "v": 1, "purpose": "auth", "transactionId": "…", "pipelineId": "…",
-  "verified": true, "iat": 1730000000000, "exp": 1730000600000 }
+  "verified": true, "iat": 1730000000000, "exp": 1730000120000 }
 ```
 
-`iat`/`exp` are **milliseconds** since the Unix epoch (`exp` ≈ 10 minutes after `iat`).
+`iat`/`exp` are **milliseconds** since the Unix epoch (`exp` ≈ 2 minutes after `iat`).
 
 **The signature — exactly what is HMAC'd, in this order**
 
@@ -184,13 +207,17 @@ signature = HMAC_SHA256( key = YOUR_API_KEY, message = "pkrt1." + base64url(payl
 1. Reject if `token` doesn't start with `pkrt1.`.
 2. Strip the `pkrt1.` prefix, then split the remainder on `.` — there must be **exactly
    two** segments, `dataSegment` and `sigSegment` (reject otherwise).
-3. Compute `expected = HMAC_SHA256(apiKey, "pkrt1." + dataSegment)`.
-4. **Constant-time-compare** `expected` against `base64url-decode(sigSegment)`. Reject on
+3. Require both segments to be **canonical** unpadded base64url: decode, re-encode, and
+   reject unless the round-trip reproduces the segment exactly. (An alias of a segment's
+   final character decodes to identical bytes, so a re-encoded token would still verify and
+   bypass string-keyed single-use tracking.)
+4. Compute `expected = HMAC_SHA256(apiKey, "pkrt1." + dataSegment)`.
+5. **Constant-time-compare** `expected` against `base64url-decode(sigSegment)`. Reject on
    mismatch (forged / tampered).
-5. `payload = JSON(base64url-decode(dataSegment))`.
-6. Reject if `now_ms > payload.exp` (expired).
-7. Require `payload.verified == true`.
-8. Require `payload.transactionId ==` the transaction **you** started — this binds the proof to
+6. `payload = JSON(base64url-decode(dataSegment))`.
+7. Reject if `now_ms > payload.exp` (expired).
+8. Require `payload.verified == true`.
+9. Require `payload.transactionId ==` the transaction **you** started — this binds the proof to
    *this* sign-in. Only then create the session.
 
 **Reference verifier — Node.js** (zero deps; portable to any backend language):
@@ -206,6 +233,10 @@ export function verifyAkedlyResult(token, apiKey) {
   const [data, sig] = parts;
   const b64u = /^[A-Za-z0-9_-]+$/;                                  // strict unpadded base64url
   if (!b64u.test(data) || !b64u.test(sig)) return null;            // no alternate serializations
+  // Canonical encoding only: an alias of the final char decodes to identical bytes,
+  // which would bypass string-keyed single-use tracking.
+  if (Buffer.from(data, 'base64url').toString('base64url') !== data ||
+      Buffer.from(sig, 'base64url').toString('base64url') !== sig) return null;
   const expected = crypto.createHmac('sha256', apiKey).update('pkrt1.' + data).digest();
   const given = Buffer.from(sig, 'base64url');
   if (expected.length !== given.length || !crypto.timingSafeEqual(expected, given)) return null;
@@ -224,6 +255,8 @@ import 'dart:convert';
 import 'package:crypto/crypto.dart';
 
 String _pad(String s) => s + '=' * ((4 - s.length % 4) % 4);
+
+String _unpadded(List<int> bytes) => base64Url.encode(bytes).replaceAll('=', '');
 
 bool _constantTimeEquals(List<int> a, List<int> b) {
   if (a.length != b.length) return false;
@@ -254,25 +287,31 @@ Map<String, dynamic>? verifyAkedlyResult(String token, String apiKey) {
   final Map<String, dynamic> payload;
   try {
     final provided = base64Url.decode(_pad(sigSegment));
+    final dataBytes = base64Url.decode(_pad(dataSegment));
+    // Canonical encoding only: an alias of the final char decodes to identical bytes,
+    // which would bypass string-keyed single-use tracking.
+    if (_unpadded(provided) != sigSegment || _unpadded(dataBytes) != dataSegment) return null;
     if (!_constantTimeEquals(expected, provided)) return null;
-    payload = json.decode(utf8.decode(base64Url.decode(_pad(dataSegment))))
-        as Map<String, dynamic>;
+    final decoded = json.decode(utf8.decode(dataBytes));
+    if (decoded is! Map<String, dynamic>) return null;              // payload must be a JSON object
+    payload = decoded;
   } on FormatException {
     return null;
   }
   final exp = payload['exp'];
   if (exp is! num || DateTime.now().millisecondsSinceEpoch > exp) return null; // missing/invalid or expired
+  if (payload['verified'] != true) return null;                     // only a verified outcome is trustworthy
   return payload; // { verified, purpose, transactionId, pipelineId, ... }
 }
 
 // On your sign-in route, after the app POSTs { resultToken }:
 //   final claim = verifyAkedlyResult(resultToken, akedlyApiKey);
-//   if (claim != null && claim['verified'] == true && claim['transactionId'] == expectedTxId) {
+//   if (claim != null && claim['transactionId'] == expectedTxId) {
 //     createSession(user);
 //   }
 ```
 
-Treat the token like a one-time auth code: short-lived (~10 min) and accepted once.
+Treat the token like a one-time auth code: short-lived (~2 min) and accepted once.
 
 ### Local vs on-device testing
 

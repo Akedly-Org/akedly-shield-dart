@@ -54,5 +54,25 @@ void main() {
   test('a malformed query encoding is a failed result, not a crash', () {
     final r = AkedlyPasskey.parseResultFromQuery('verified=%&resultToken=pkrt1.a.b');
     expect(r.verified, isFalse);
+    expect(r.reason, equals('failed'));
+  });
+
+  test('an invalid percent-escape digit is a failed result, not a crash', () {
+    final r = AkedlyPasskey.parseResultFromQuery('verified=%G1&resultToken=pkrt1.a.b');
+    expect(r.verified, isFalse);
+    expect(r.reason, equals('failed'));
+  });
+
+  test('invalid UTF-8 in a query value is a failed result, not a crash', () {
+    final r = AkedlyPasskey.parseResultFromQuery('verified=%FF');
+    expect(r.verified, isFalse);
+    expect(r.reason, equals('failed'));
+  });
+
+  test('verified=true with an empty resultToken is not trusted', () {
+    final r = AkedlyPasskey.parseResultFromQuery('verified=true&resultToken=');
+    expect(r.verified, isFalse);
+    expect(r.resultToken, isNull);
+    expect(r.reason, equals('no_proof'));
   });
 }
