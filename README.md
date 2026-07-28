@@ -125,7 +125,7 @@ if (result.verified) {
   // 3. Confirm offline on YOUR backend (no polling, no callback) — see below.
   await myBackend.completeSignIn(result.resultToken!);
 } else {
-  // result.reason: "closed" (cancel) | "ineligible" | "start_failed" | <server code>
+  // result.reason: "closed" (cancel) | "start_failed" | "no_proof" | "failed" | <server code>
   await runOtpFallback();
 }
 ```

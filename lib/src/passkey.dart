@@ -21,7 +21,7 @@ class AkedlyPasskeyResult {
   /// Signed, offline-verifiable proof of a verified outcome. null otherwise.
   final String? resultToken;
 
-  /// null when verified; else "closed" | "ineligible" | "start_failed" |
+  /// null when verified; else "closed" (user dismissed) | "start_failed" |
   /// "no_proof" (verified with no result token) | "failed" (unparseable callback) |
   /// &lt;server code&gt;.
   final String? reason;

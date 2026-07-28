@@ -53,17 +53,20 @@ must use Custom Tabs).
    throws code `CANCELED`), `'start_failed'`, `'no_proof'`, `'failed'` (unparseable callback), or a
    server `code`.
 
-## Live defects to fix in this repo
+## Decided items
 
-- **`ineligible` is documented but unreachable (OI-I class).** `lib/src/passkey.dart:24` lists
-  `"ineligible"` in the `reason` doc comment, but **nothing in this repo — or any sibling SDK — can
-  ever emit it** (verified 2026-07-28: it appears nowhere else in kotlin, swift, the JS SDK, or the
-  backend). Remove it from the doc comment. Do not add code to produce it; the value has no meaning
-  in the ceremony contract.
-- **`flutter_web_auth_2: ^3.0.0` is superseded by 5.x** (`pubspec.yaml:15`, open item OI-H). The
-  upgrade needs real device QA on both platforms, which is why it has been deferred rather than
-  done. If you are not in a position to run that QA, leave the pin alone and say so — do not bump it
-  blind.
+- **`ineligible` — ✅ FIXED 2026-07-28.** `lib/src/passkey.dart:24` documented a `"reason"` value that
+  **nothing in this repo, any sibling SDK, or the backend could ever emit** (verified: it appeared
+  nowhere else in kotlin, swift, the JS SDK, or the backend). It has been removed from the doc comment.
+  Do not reintroduce it, and do not add code to produce it — the value has no meaning in the ceremony
+  contract.
+- **`flutter_web_auth_2: ^3.0.0` stays pinned — ✅ DEFERRED 2026-07-28 (OI-H).** 5.x supersedes it, but
+  the upgrade changes the very component that owns the browser handoff, the user-cancel signal, and the
+  callback capture — the three things this SDK cannot verify without **real-device QA on both iOS and
+  Android**, which is not available here. A blind bump would trade a known-working integration for an
+  unverified one on the exact path that matters most. Leave the pin alone until someone can run that QA.
+  **Do not bump it because a tool flags the version as outdated** — that is the whole reason this note
+  exists.
 
 ## Gotchas
 
