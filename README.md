@@ -1,6 +1,6 @@
 # akedly_shield
 
-Client-side PoW solver and Turnstile helper for Akedly Shield V1.2 (Dart/Flutter).
+Client-side PoW solver, Turnstile helper, and hosted passkey ceremony launcher for Akedly Shield V1.2 (Dart/Flutter).
 
 ## Installation
 
@@ -133,6 +133,14 @@ if (result.verified) {
 To **enroll** a passkey, pass the `enrollmentToken` from a successful OTP `/verify`
 as the `token` instead — the API is identical; enrollment is proven on the next
 successful sign-in.
+
+> ⚠️ **Enrollment's result is unproven unless you ask for the proof.** The hosted page relays a
+> `resultToken` only to a **server-signed** return target, and the enrollment token carries one only
+> if your backend passed `returnTarget` to `/verify` (e.g. `{ "url": "myapp://akedly-passkey" }`).
+> Omit it and enrollment still succeeds — the passkey is created and works — but this SDK reports
+> `verified: false` / `no_proof`, because it refuses to call an unproven result verified. So either
+> pass `returnTarget` at `/verify`, or treat the enroll result as advisory and let the next
+> successful sign-in be the proof. Do not gate your "passkey enabled" UI on the enroll result alone.
 
 You must register the callback scheme once on Android (the standard
 `flutter_web_auth_2` 3.x setup); iOS needs no setup.

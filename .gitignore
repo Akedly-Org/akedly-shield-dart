@@ -1,0 +1,11 @@
+# Dart/Flutter build + tool output
+.dart_tool/
+.packages
+build/
+doc/api/
+
+# This is a LIBRARY package, not an application — pub's convention is that libraries do
+# NOT commit their lock file, so consumers resolve against their own constraint set.
+pubspec.lock
+
+.DS_Store
