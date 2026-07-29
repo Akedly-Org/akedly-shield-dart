@@ -111,8 +111,10 @@ embedded WebView, no associated-domains / Digital Asset Links setup.**
 import 'package:akedly_shield/akedly_shield.dart';
 
 // 1. Your backend clears the gate + starts the ceremony:
-//    POST /api/v1.2/transactions/passkey/auth-options -> { data: { ceremonyToken } }
-final ceremonyToken = await myBackend.startPasskeyAuth(phone); // or a "no passkey" code -> use OTP
+//    POST /api/v1.2/transactions/passkey/auth-options
+//      { …, returnTarget: { "url": "myapp://akedly-passkey" } }  // <-- REQUIRED for the resultToken
+//    -> { data: { ceremonyToken } }
+final ceremonyToken = await myBackend.startPasskeyAuth(phone); // or 404 NO_PASSKEY -> use OTP
 
 // 2. Run it. `callbackScheme` is your app's registered URL scheme.
 final result = await AkedlyPasskey.openCeremony(
@@ -122,7 +124,8 @@ final result = await AkedlyPasskey.openCeremony(
 );
 
 if (result.verified) {
-  // 3. Confirm offline on YOUR backend (no polling, no callback) — see below.
+  // 3. Confirm offline on YOUR backend — no polling needed. (Akedly also fires the pipeline's
+  //    backend callback, if one is configured; it is unsigned, so the resultToken is the proof.)
   await myBackend.completeSignIn(result.resultToken!);
 } else {
   // result.reason: "closed" (cancel) | "start_failed" | "no_proof" | "failed" | <server code>
@@ -134,13 +137,17 @@ To **enroll** a passkey, pass the `enrollmentToken` from a successful OTP `/veri
 as the `token` instead — the API is identical; enrollment is proven on the next
 successful sign-in.
 
-> ⚠️ **Enrollment's result is unproven unless you ask for the proof.** The hosted page relays a
-> `resultToken` only to a **server-signed** return target, and the enrollment token carries one only
-> if your backend passed `returnTarget` to `/verify` (e.g. `{ "url": "myapp://akedly-passkey" }`).
-> Omit it and enrollment still succeeds — the passkey is created and works — but this SDK reports
-> `verified: false` / `no_proof`, because it refuses to call an unproven result verified. So either
-> pass `returnTarget` at `/verify`, or treat the enroll result as advisory and let the next
-> successful sign-in be the proof. Do not gate your "passkey enabled" UI on the enroll result alone.
+> ⚠️ **The result is unproven unless you ask for the proof — on BOTH flows.** The hosted page relays
+> a `resultToken` only to a **server-signed** return target. The `returnUrl` this SDK puts in the
+> query is deliberately untrusted, so the token is stripped unless your backend passed `returnTarget`
+> (e.g. `{ "url": "myapp://akedly-passkey" }`) — to `/auth-options` when authenticating, or to
+> `/verify` when enrolling. Omit it and the ceremony still succeeds, but this SDK reports
+> `verified: false` / `no_proof`, because it refuses to call an unproven result verified.
+>
+> - **Authenticating:** pass `returnTarget` at `/auth-options`, or you will never see `verified: true`
+>   in the app and must reconcile against the pipeline's backend callback instead.
+> - **Enrolling:** pass it at `/verify`, or treat the enroll result as advisory and let the next
+>   successful sign-in be the proof. Do not gate your "passkey enabled" UI on the enroll result alone.
 
 You must register the callback scheme once on Android (the standard
 `flutter_web_auth_2` 3.x setup); iOS needs no setup.

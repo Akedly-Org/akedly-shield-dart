@@ -7,7 +7,7 @@ import 'package:flutter_web_auth_2/flutter_web_auth_2.dart';
 /// The relayed signal is **non-authoritative on its own**. Confirm a sign-in by
 /// sending [resultToken] to YOUR backend, which verifies it **offline** by
 /// recomputing an HMAC with your Akedly API key — no polling, no
-/// server-to-server callback. See the README.
+/// server-to-server callback to Akedly. See the README.
 class AkedlyPasskeyResult {
   /// True only on a completed, server-verified ceremony.
   final bool verified;
