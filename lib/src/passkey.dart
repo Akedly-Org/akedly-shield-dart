@@ -44,6 +44,14 @@ class AkedlyPasskeyResult {
 /// No embedded WebView, no associated-domains / Digital Asset Links setup.
 class AkedlyPasskey {
   static const String defaultOrigin = 'https://auth.akedly.io';
+  static const Set<String> _reservedResultParams = {
+    'type',
+    'purpose',
+    'verified',
+    'transactionId',
+    'code',
+    'resultToken',
+  };
 
   /// Build the ceremony URL: `<origin>/pk?token=…&returnUrl=<scheme>://akedly-passkey`.
   /// Pure (no platform deps) so it is unit-testable.
@@ -68,7 +76,8 @@ class AkedlyPasskey {
     String ceremonyOrigin = defaultOrigin,
   }) async {
     try {
-      final url = buildUrl(token, callbackScheme, ceremonyOrigin: ceremonyOrigin);
+      final url =
+          buildUrl(token, callbackScheme, ceremonyOrigin: ceremonyOrigin);
       final callback = await FlutterWebAuth2.authenticate(
         url: url,
         callbackUrlScheme: callbackScheme,
@@ -101,6 +110,9 @@ class AkedlyPasskey {
   /// is a failed result, not a crash.
   static AkedlyPasskeyResult parseResult(Uri uri) {
     try {
+      if (_hasDuplicateReservedParams(uri.queryParametersAll)) {
+        return const AkedlyPasskeyResult(verified: false, reason: 'failed');
+      }
       return _fromParams(uri.queryParameters);
     } on FormatException {
       return const AkedlyPasskeyResult(verified: false, reason: 'failed');
@@ -114,13 +126,38 @@ class AkedlyPasskey {
   static AkedlyPasskeyResult parseResultFromQuery(String query) {
     final q = query.startsWith('?') ? query.substring(1) : query;
     try {
-      return _fromParams(Uri.splitQueryString(q));
+      final params = _parseQuery(q);
+      if (params == null) return _failedResult;
+      return _fromParams(params);
     } on FormatException {
       return const AkedlyPasskeyResult(verified: false, reason: 'failed');
     } on ArgumentError {
       return const AkedlyPasskeyResult(verified: false, reason: 'failed');
     }
   }
+
+  static bool _hasDuplicateReservedParams(Map<String, List<String>> params) {
+    return _reservedResultParams.any((name) => (params[name]?.length ?? 0) > 1);
+  }
+
+  static Map<String, String>? _parseQuery(String query) {
+    final params = <String, String>{};
+    for (final pair in query.split('&')) {
+      if (pair.isEmpty) continue;
+      final separator = pair.indexOf('=');
+      final rawName = separator < 0 ? pair : pair.substring(0, separator);
+      final rawValue = separator < 0 ? '' : pair.substring(separator + 1);
+      final name = Uri.decodeQueryComponent(rawName);
+      if (_reservedResultParams.contains(name) && params.containsKey(name)) {
+        return null;
+      }
+      params[name] = Uri.decodeQueryComponent(rawValue);
+    }
+    return params;
+  }
+
+  static const AkedlyPasskeyResult _failedResult =
+      AkedlyPasskeyResult(verified: false, reason: 'failed');
 
   // Enforces the contract that a `verified` outcome MUST carry the offline-verifiable
   // [AkedlyPasskeyResult.resultToken]. A bare `…?verified=true` with no token (a malformed or
@@ -135,7 +172,8 @@ class AkedlyPasskey {
       purpose: p['purpose'],
       transactionId: p['transactionId'],
       resultToken: verified ? token : null,
-      reason: verified ? null : (claimed ? 'no_proof' : (p['code'] ?? 'failed')),
+      reason:
+          verified ? null : (claimed ? 'no_proof' : (p['code'] ?? 'failed')),
     );
   }
 }

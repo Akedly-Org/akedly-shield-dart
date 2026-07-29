@@ -26,7 +26,8 @@ void main() {
   });
 
   test('parseResultFromQuery carries a failure code as the reason', () {
-    final r = AkedlyPasskey.parseResultFromQuery('verified=false&code=ineligible');
+    final r =
+        AkedlyPasskey.parseResultFromQuery('verified=false&code=ineligible');
     expect(r.verified, isFalse);
     expect(r.resultToken, isNull);
     expect(r.reason, equals('ineligible'));
@@ -46,19 +47,22 @@ void main() {
   });
 
   test('verified=true with a whitespace-only resultToken is not trusted', () {
-    final r = AkedlyPasskey.parseResultFromQuery('verified=true&resultToken=%20%20');
+    final r =
+        AkedlyPasskey.parseResultFromQuery('verified=true&resultToken=%20%20');
     expect(r.verified, isFalse);
     expect(r.reason, equals('no_proof'));
   });
 
   test('a malformed query encoding is a failed result, not a crash', () {
-    final r = AkedlyPasskey.parseResultFromQuery('verified=%&resultToken=pkrt1.a.b');
+    final r =
+        AkedlyPasskey.parseResultFromQuery('verified=%&resultToken=pkrt1.a.b');
     expect(r.verified, isFalse);
     expect(r.reason, equals('failed'));
   });
 
   test('an invalid percent-escape digit is a failed result, not a crash', () {
-    final r = AkedlyPasskey.parseResultFromQuery('verified=%G1&resultToken=pkrt1.a.b');
+    final r = AkedlyPasskey.parseResultFromQuery(
+        'verified=%G1&resultToken=pkrt1.a.b');
     expect(r.verified, isFalse);
     expect(r.reason, equals('failed'));
   });
@@ -74,5 +78,32 @@ void main() {
     expect(r.verified, isFalse);
     expect(r.resultToken, isNull);
     expect(r.reason, equals('no_proof'));
+  });
+
+  test('duplicate reserved result params fail closed', () {
+    final reservedParams = <String, String>{
+      'type': 'AKEDLY_PASSKEY_RESULT',
+      'purpose': 'auth',
+      'verified': 'true',
+      'transactionId': 'tx_9',
+      'code': 'ineligible',
+      'resultToken': 'pkrt1.aaa.bbb',
+    };
+    final baseQuery = reservedParams.entries
+        .map((entry) => '${entry.key}=${entry.value}')
+        .join('&');
+    for (final entry in reservedParams.entries) {
+      final r = AkedlyPasskey.parseResultFromQuery(
+          '$baseQuery&${entry.key}=${entry.value}');
+      expect(r.verified, isFalse, reason: 'duplicate ${entry.key}');
+      expect(r.resultToken, isNull);
+      expect(r.reason, equals('failed'));
+
+      final uriResult = AkedlyPasskey.parseResult(Uri.parse(
+          'myapp://akedly-passkey?$baseQuery&${entry.key}=${entry.value}'));
+      expect(uriResult.verified, isFalse, reason: 'URI duplicate ${entry.key}');
+      expect(uriResult.resultToken, isNull);
+      expect(uriResult.reason, equals('failed'));
+    }
   });
 }
