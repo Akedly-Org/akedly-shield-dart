@@ -9,7 +9,8 @@ import 'package:flutter_web_auth_2/flutter_web_auth_2.dart';
 /// recomputing an HMAC with your Akedly API key — no polling, no
 /// server-to-server callback to Akedly. See the README.
 class AkedlyPasskeyResult {
-  /// True only on a completed, server-verified ceremony.
+  /// True only when the relay claims completion and includes a non-empty result token.
+  /// The app must still send that token to its backend for HMAC and transaction verification.
   final bool verified;
 
   /// "auth" | "enroll" (null if the page didn't report it).
@@ -22,7 +23,8 @@ class AkedlyPasskeyResult {
   final String? resultToken;
 
   /// null when verified; else "closed" (user dismissed) | "start_failed" |
-  /// "no_proof" (verified with no result token) | "failed" (unparseable callback) |
+  /// "no_proof" (claimed verified with a missing or blank result token) |
+  /// "failed" (unparseable callback) |
   /// &lt;server code&gt;.
   final String? reason;
 
