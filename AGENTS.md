@@ -15,9 +15,13 @@ customer's behalf — the customer's own backend proxies, holding the API key.
 ## Build and test
 
 ```bash
-dart test          # test/
-dart analyze
+flutter test       # test/
+flutter analyze
 ```
+
+**`flutter`, not `dart`.** `pubspec.yaml` declares `flutter: sdk: flutter` as a real dependency, so
+`dart test` / `dart analyze` cannot resolve the package at all — the Flutter SDK is not on the plain
+Dart tool's path. `dart test` was written here until 2026-08-03 and never worked.
 
 There is **no CI in this repo**. Never claim a build or test run you did not actually see succeed.
 
@@ -44,7 +48,7 @@ must use Custom Tabs).
 
 **Clauses 1–2 are identical across all four SDKs — do not diverge.** Clause 3's `reason`
 vocabulary is deliberately **per-platform** and is NOT expected to match: Swift carries seven
-values, Dart five, and Kotlin two, because a Custom Tab cannot signal a user cancel at all.
+values, Dart six, and Kotlin two, because a Custom Tab cannot signal a user cancel at all.
 Aligning them would mean inventing values a platform cannot actually produce.
 
 **`ceremonyOrigin` must be a bare origin** — `scheme://host[:port]`, no path, no trailing slash.
@@ -53,26 +57,38 @@ the `event.origin` equality check; the natives only prefix a URL), so a path-car
 multi-slash value behaves differently per platform. It fails visibly — the ceremony 404s — so this
 is a documented input contract, not a code divergence to "fix".
 
-1. **A verified result MUST carry a `resultToken`** (`passkey.dart:132`). A claimed-verified callback
-   with no token is reported `verified: false`, `reason: 'no_proof'` — never as a trusted success.
-   **Fail closed. This is the whole security property of the relayed result**, since the callback
-   arrives over a custom scheme that cannot be trusted on its own.
+1. **A verified result MUST carry a `resultToken`** (`AkedlyPasskey._fromParams`). A claimed-verified
+   callback with no token is reported `verified: false`, `reason: 'no_proof'` — never as a trusted
+   success. **Fail closed. This is the whole security property of the relayed result**, since the
+   callback arrives over a custom scheme that cannot be trusted on its own.
 2. **The relayed signal is not authoritative.** The customer confirms a sign-in by sending
    `resultToken` to their own backend, which verifies it **offline** by recomputing an HMAC with
    their Akedly API key. No polling, no server-to-server callback needed.
+   - ⚠️ **That proof is only worth anything if the API key is NOT in the app.** The same key the
+     README's OTP example sends from the device is the HMAC key, so an integrator doing both ships
+     a forgeable proof. The README now says so; keep the warning when editing that section.
 3. **`reason` vocabulary:** `null` when verified, else `'closed'` (user dismissed — `flutter_web_auth_2`
-   throws code `CANCELED`), `'start_failed'`, `'no_proof'`, `'failed'` (unparseable callback), or a
-   server `code`.
+   throws code `CANCELED`), `'start_failed'`, `'busy'` (a ceremony is already in flight),
+   `'no_proof'`, `'failed'` (unparseable callback), or a server `code`.
+   - `'busy'` guards a real defect, not just a double-tap annoyance: `flutter_web_auth_2` keeps ONE
+     global completer, so a second `authenticate()` displaces the first and its future never
+     completes. The guard is `static` because the plugin state it protects is global.
+   - ⚠️ **The `'busy'` guard has NO test yet, and was written on a machine with no Flutter
+     toolchain (2026-08-03).** Reaching it means driving `openCeremony`, which needs the
+     `flutter_web_auth_2` method channel mocked via `TestDefaultBinaryMessengerBinding`; writing
+     that blind would have been worse than leaving it. First run with a real toolchain: add a test
+     that a second `openCeremony` while one is in flight returns `'busy'`, and one that a throwing
+     `authenticate()` still clears `_inFlight` (the `finally`).
 
 ## Decided items
 
-- **`ineligible` — ✅ REMOVED FROM THE DOCS 2026-07-28.** `lib/src/passkey.dart:24` documented it as a
-  `"reason"` value; it is not one, and it has been removed from the doc comment. Do not reintroduce it.
+- **`ineligible` — ✅ REMOVED FROM THE DOCS 2026-07-28.** The `AkedlyPasskeyResult.reason` doc comment documented it as a
+  value; it is not one, and it has been removed from the doc comment. Do not reintroduce it.
   **Two things an earlier version of this note got wrong — do not re-plant them:**
   - It was **not** Dart-only. `akedly-shield-swift`'s README carried it too, and so did the JS SDK's
     docs. That false "this repo is clean" claim is why the Swift repo was nearly skipped in the sweep.
-  - The SDK **can** surface it, by server-`code` passthrough (`passkey.dart:138`, asserted in
-    `test/passkey_test.dart:29-32`). It is unreachable only because **no server sends that code** —
+  - The SDK **can** surface it, by server-`code` passthrough (the `p['code'] ?? 'failed'` fallback in `_fromParams`, asserted by the
+    server-`code` passthrough test). It is unreachable only because **no server sends that code** —
     not because the code path refuses it. "Nothing could ever emit it" was wrong on both halves.
 
   The real server-side set is `NO_PASSKEY`, `PASSKEY_DISABLED`, `INSUFFICIENT_QUOTA`,
@@ -88,14 +104,14 @@ is a documented input contract, not a code divergence to "fix".
   **What the pin costs while it stands (checked 2026-07-28):** `akedly_shield` is **not published on
   pub.dev**, so the pin blocks no customer today. But `flutter_web_auth_2` is at 5.0.3, and any app
   already depending on `>=4` cannot co-depend on this SDK — not even as a git dependency — because
-  pub version-solving rejects it outright. README.md:9 nonetheless tells customers to install
+  pub version-solving rejects it outright. The README's install snippet nonetheless tells customers to install
   `akedly_shield: ^1.1.0` as if it were on pub. **Publishing to pub.dev is the trigger to revisit the
   pin: do not publish with `^3.0.0` without reopening OI-H.**
 
 ## Gotchas
 
 - `flutter_web_auth_2` throws a `PlatformException` with code `CANCELED` on user dismissal; any other
-  code is an integration failure. `passkey.dart:85-91` makes exactly that distinction — an
+  code is an integration failure. The `on PlatformException` branch of `openCeremony` makes exactly that distinction — an
   integration bug must never be reported as "the user changed their mind". Preserve it.
 - The ceremony origin is injectable so tests and QA can point at a local Auth-Gateway rather than
   production. Keep it injectable.

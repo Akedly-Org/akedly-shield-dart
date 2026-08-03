@@ -23,6 +23,7 @@ class AkedlyPasskeyResult {
   final String? resultToken;
 
   /// null when verified; else "closed" (user dismissed) | "start_failed" |
+  /// "busy" (a ceremony is already in flight — a double-tap) |
   /// "no_proof" (claimed verified with a missing or blank result token) |
   /// "failed" (unparseable callback) |
   /// &lt;server code&gt;.
@@ -70,13 +71,31 @@ class AkedlyPasskey {
     return '$origin/pk?token=$tok&returnUrl=$rt';
   }
 
+  static bool _inFlight = false;
+
   /// Run the ceremony in a system auth session and return the parsed result.
   /// [callbackScheme] is your app's registered URL scheme (no `://`).
+  ///
+  /// Calling this while a ceremony is still running resolves immediately with
+  /// `reason: 'busy'` and leaves the running one untouched. This is what a double-tap on a
+  /// sign-in button produces, and it is not cosmetic: `flutter_web_auth_2` keeps ONE global
+  /// completer per app, so a second `authenticate()` displaces the first — whose future then
+  /// never completes, stranding the first caller forever. The guard is static because
+  /// `openCeremony` is static and the plugin's state is global; a per-instance guard would not
+  /// match what is actually being protected.
+  ///
+  /// An integrator whose `else` branch falls through to OTP will fire a second OTP on every
+  /// double-tap unless it handles `'busy'` — so treat it as "ignore, one is already running",
+  /// not as a failure.
   static Future<AkedlyPasskeyResult> openCeremony({
     required String token,
     required String callbackScheme,
     String ceremonyOrigin = defaultOrigin,
   }) async {
+    if (_inFlight) {
+      return const AkedlyPasskeyResult(verified: false, reason: 'busy');
+    }
+    _inFlight = true;
     try {
       final url =
           buildUrl(token, callbackScheme, ceremonyOrigin: ceremonyOrigin);
@@ -102,6 +121,10 @@ class AkedlyPasskey {
           verified: false, reason: canceled ? 'closed' : 'start_failed');
     } catch (_) {
       return const AkedlyPasskeyResult(verified: false, reason: 'start_failed');
+    } finally {
+      // `finally`, not a reset at each return: every path above returns, and a throw that
+      // escaped the catches would otherwise leave the SDK permanently 'busy' for the process.
+      _inFlight = false;
     }
   }
 
