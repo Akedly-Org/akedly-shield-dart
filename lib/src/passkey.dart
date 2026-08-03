@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:flutter/services.dart' show PlatformException;
 import 'package:flutter_web_auth_2/flutter_web_auth_2.dart';
 
@@ -73,6 +74,28 @@ class AkedlyPasskey {
 
   static bool _inFlight = false;
 
+  /// The ceremony's single call into `flutter_web_auth_2`, behind a swappable seam.
+  ///
+  /// Production never touches this. It exists because the `'busy'` guard below is
+  /// unreachable from a test otherwise: reaching it needs a FIRST ceremony still pending,
+  /// which means a real browser session or a mock of the plugin's platform channel. Mocking
+  /// the channel binds the test to the plugin's internal channel name and to host-platform
+  /// behaviour that differs under `flutter test`; a seam binds it to nothing.
+  @visibleForTesting
+  static Future<String> Function({
+    required String url,
+    required String callbackUrlScheme,
+  }) authenticator = _platformAuthenticate;
+
+  static Future<String> _platformAuthenticate({
+    required String url,
+    required String callbackUrlScheme,
+  }) =>
+      FlutterWebAuth2.authenticate(
+        url: url,
+        callbackUrlScheme: callbackUrlScheme,
+      );
+
   /// Run the ceremony in a system auth session and return the parsed result.
   /// [callbackScheme] is your app's registered URL scheme (no `://`).
   ///
@@ -99,7 +122,7 @@ class AkedlyPasskey {
     try {
       final url =
           buildUrl(token, callbackScheme, ceremonyOrigin: ceremonyOrigin);
-      final callback = await FlutterWebAuth2.authenticate(
+      final callback = await authenticator(
         url: url,
         callbackUrlScheme: callbackScheme,
       );

@@ -73,12 +73,23 @@ is a documented input contract, not a code divergence to "fix".
    - `'busy'` guards a real defect, not just a double-tap annoyance: `flutter_web_auth_2` keeps ONE
      global completer, so a second `authenticate()` displaces the first and its future never
      completes. The guard is `static` because the plugin state it protects is global.
-   - ⚠️ **The `'busy'` guard has NO test yet, and was written on a machine with no Flutter
-     toolchain (2026-08-03).** Reaching it means driving `openCeremony`, which needs the
-     `flutter_web_auth_2` method channel mocked via `TestDefaultBinaryMessengerBinding`; writing
-     that blind would have been worse than leaving it. First run with a real toolchain: add a test
-     that a second `openCeremony` while one is in flight returns `'busy'`, and one that a throwing
-     `authenticate()` still clears `_inFlight` (the `finally`).
+   - ✅ **The `'busy'` guard is now covered — `test/passkey_ceremony_test.dart`, four tests**
+     (2026-08-04): a second ceremony while one is in flight returns `'busy'` **and never reaches
+     the plugin** (call count asserted, not just the result), and the guard is released on all
+     three exits — completion, a thrown session, and a `CANCELED` dismissal followed by a retry.
+     Written because the guard shipped untested: with the parser surface fully covered, deleting
+     `_inFlight` left every test green.
+   - ⚠️ **Those four tests have NEVER BEEN RUN — no Flutter toolchain on the authoring machine
+     (2026-08-04).** They are written to compile against nothing but `dart:async`, `flutter_test`
+     and this package, which is why `openCeremony` gained the `authenticator` seam: mocking the
+     `flutter_web_auth_2` method channel would have bound the test to the plugin's internal channel
+     name and to host-platform behaviour that differs under `flutter test` — both unverifiable here.
+     **First run with a real toolchain: `flutter test`, and treat any failure as a defect in these
+     tests, not in the guard** (the guard itself was verified by inspection).
+   - `dev_dependencies` gained `flutter_test` (2026-08-04). Without it `flutter test` cannot launch
+     at all: flutter_tools' generated bootstrap imports `package:flutter_test/flutter_test.dart`
+     unconditionally. This was almost certainly why the suite had never run, and it means the 12
+     pre-existing `package:test` tests were never green either — nobody had executed them.
 
 ## Decided items
 
