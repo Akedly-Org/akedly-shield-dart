@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - run: flutter --version
+
+      # The one plausible way this package fails to resolve: `test: ^1.24.0` is declared
+      # alongside `flutter_test`, which pins its own `test_api`. If those cannot co-resolve,
+      # it fails here rather than in a customer's build.
+      - run: flutter pub get
+
+      - run: flutter analyze --no-fatal-infos
+
+      - run: flutter test
