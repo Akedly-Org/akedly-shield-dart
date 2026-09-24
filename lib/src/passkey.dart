@@ -1,6 +1,11 @@
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart' show visibleForTesting;
-import 'package:flutter/services.dart' show PlatformException;
+import 'package:flutter/services.dart'
+    show MethodChannel, MissingPluginException, PlatformException;
 import 'package:flutter_web_auth_2/flutter_web_auth_2.dart';
+
+import 'passkey_native_exception.dart';
 
 /// Result of a hosted V1.2 passkey ceremony (auth.akedly.io/pk), deep-linked
 /// back to the app.
@@ -39,15 +44,32 @@ class AkedlyPasskeyResult {
   });
 }
 
-/// Hosted V1.2 passkey ceremony for Flutter (iOS + Android).
+/// Hosted and native V1.2 passkey ceremonies for Flutter (iOS + Android).
 ///
-/// The ceremony runs in a system authentication session (`ASWebAuthenticationSession`
-/// on iOS, a Custom Tab on Android, via `flutter_web_auth_2`) on the akedly.io
-/// origin — so platform passkeys (Face ID / Touch ID / fingerprint / device PIN)
-/// work — and returns the result through a deep link to your app's custom scheme.
-/// No embedded WebView, no associated-domains / Digital Asset Links setup.
+/// Hosted ceremonies run in a system authentication session
+/// (`ASWebAuthenticationSession` on iOS, a Custom Tab on Android, via
+/// `flutter_web_auth_2`) on the akedly.io origin and return through a deep link.
+/// They do not require an embedded WebView, associated domains, or Digital Asset Links.
+///
+/// Native registration and authentication use the Akedly-owned method channel to call
+/// Authentication Services or Credential Manager directly. Native methods make no network
+/// request and never carry an Akedly API key.
 class AkedlyPasskey {
   static const String defaultOrigin = 'https://auth.akedly.io';
+
+  /// The channel used by the native passkey bridge.
+  ///
+  /// `isNativeSupported` takes no arguments and returns a bool. `register`
+  /// and `authenticate` accept `optionsJson` as a JSON String and return a
+  /// JSON String response. Native failures use the closed codes `unsupported`,
+  /// `cancelled`, `noCredential`, `invalidOptions`, and `failed`; `domError`
+  /// and `platformCode` are optional diagnostic details. Akedly reserves
+  /// `platformCode` values `busy`, `noActivity`, and `unexpectedCredential`;
+  /// other values are raw platform diagnostics.
+  @visibleForTesting
+  static const MethodChannel nativeChannel =
+      MethodChannel('akedly_shield/passkey');
+
   static const Set<String> _reservedResultParams = {
     'type',
     'purpose',
@@ -56,6 +78,166 @@ class AkedlyPasskey {
     'code',
     'resultToken',
   };
+
+  static bool _nativeInFlight = false;
+
+  /// Register a platform passkey from the `data.options` object returned by
+  /// the merchant backend's `/register-options` call.
+  ///
+  /// This method makes no network request and never carries an Akedly API key.
+  /// The returned map is the `attResp` object to send to the merchant backend.
+  /// A non-successful ceremony throws [AkedlyPasskeyNativeException]. A second native call
+  /// while one is running throws `failed` with `platformCode: busy`; ignore it rather than
+  /// starting another fallback. On iOS, a cancelled result also covers no matching credential.
+  static Future<Map<String, dynamic>> register(
+    Map<String, dynamic> options,
+  ) =>
+      _runNative('register', options);
+
+  /// Authenticate with a platform passkey from the `data.options` object
+  /// returned by the merchant backend's `/auth-options` call.
+  ///
+  /// This method makes no network request and never carries an Akedly API key.
+  /// The returned map is the `authResp` object to send to the merchant backend.
+  /// A non-successful ceremony throws [AkedlyPasskeyNativeException]. A second native call
+  /// while one is running throws `failed` with `platformCode: busy`; ignore it rather than
+  /// starting another fallback. On iOS, a cancelled result also covers no matching credential.
+  static Future<Map<String, dynamic>> authenticate(
+    Map<String, dynamic> options,
+  ) =>
+      _runNative('authenticate', options);
+
+  /// Reports whether the current platform can present a native passkey sheet.
+  ///
+  /// Returns `false` when the plugin is unavailable, the operating-system
+  /// version is too old, or the platform credential provider is unavailable. On Android 14+
+  /// this check returns `true` without requiring a Google Play Services check.
+  static Future<bool> isNativeSupported() async {
+    try {
+      final supported =
+          await nativeChannel.invokeMethod<bool>('isNativeSupported');
+      return supported == true;
+    } on MissingPluginException {
+      return false;
+    } on PlatformException {
+      return false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  static Future<Map<String, dynamic>> _runNative(
+    String method,
+    Map<String, dynamic> options,
+  ) async {
+    if (_nativeInFlight) {
+      throw const AkedlyPasskeyNativeException(
+        reason: AkedlyPasskeyNativeReason.failed,
+        message: 'A native passkey ceremony is already in flight.',
+        platformCode: 'busy',
+      );
+    }
+
+    _nativeInFlight = true;
+    try {
+      final optionsJson = _encodeNativeOptions(options);
+      final responseJson = await nativeChannel.invokeMethod<String>(
+        method,
+        <String, dynamic>{'optionsJson': optionsJson},
+      );
+      if (responseJson == null) {
+        throw const AkedlyPasskeyNativeException(
+          reason: AkedlyPasskeyNativeReason.failed,
+          message: 'The native passkey bridge returned no response.',
+        );
+      }
+      return _decodeNativeResponse(responseJson);
+    } on AkedlyPasskeyNativeException {
+      rethrow;
+    } on MissingPluginException {
+      throw const AkedlyPasskeyNativeException(
+        reason: AkedlyPasskeyNativeReason.unsupported,
+        message: 'Native passkeys are not available on this platform.',
+      );
+    } on PlatformException catch (error) {
+      throw _nativeExceptionFromPlatform(error);
+    } on FormatException catch (error) {
+      throw AkedlyPasskeyNativeException(
+        reason: AkedlyPasskeyNativeReason.failed,
+        message: error.message,
+      );
+    } on TypeError catch (error) {
+      throw AkedlyPasskeyNativeException(
+        reason: AkedlyPasskeyNativeReason.failed,
+        message: error.toString(),
+      );
+    } finally {
+      _nativeInFlight = false;
+    }
+  }
+
+  static String _encodeNativeOptions(Map<String, dynamic> options) {
+    try {
+      return jsonEncode(options);
+    } on JsonUnsupportedObjectError catch (error) {
+      throw AkedlyPasskeyNativeException(
+        reason: AkedlyPasskeyNativeReason.invalidOptions,
+        message: error.toString(),
+      );
+    } on TypeError catch (error) {
+      throw AkedlyPasskeyNativeException(
+        reason: AkedlyPasskeyNativeReason.invalidOptions,
+        message: error.toString(),
+      );
+    }
+  }
+
+  static Map<String, dynamic> _decodeNativeResponse(String responseJson) {
+    final decoded = jsonDecode(responseJson);
+    if (decoded is! Map) {
+      throw const AkedlyPasskeyNativeException(
+        reason: AkedlyPasskeyNativeReason.failed,
+        message: 'The native passkey bridge returned a non-object response.',
+      );
+    }
+    final response = decoded['response'];
+    if (response is! Map) {
+      throw const AkedlyPasskeyNativeException(
+        reason: AkedlyPasskeyNativeReason.failed,
+        message: 'The native passkey response has no response object.',
+      );
+    }
+    final result = Map<String, dynamic>.from(decoded);
+    final responseMap = Map<String, dynamic>.from(response);
+    if (responseMap['userHandle'] == null) {
+      responseMap.remove('userHandle');
+    }
+    result['response'] = responseMap;
+    return result;
+  }
+
+  static AkedlyPasskeyNativeException _nativeExceptionFromPlatform(
+    PlatformException error,
+  ) {
+    final details = error.details is Map
+        ? Map<String, dynamic>.from(error.details as Map)
+        : const <String, dynamic>{};
+    final reason = switch (error.code) {
+      'unsupported' => AkedlyPasskeyNativeReason.unsupported,
+      'cancelled' => AkedlyPasskeyNativeReason.cancelled,
+      'noCredential' => AkedlyPasskeyNativeReason.noCredential,
+      'invalidOptions' => AkedlyPasskeyNativeReason.invalidOptions,
+      'failed' => AkedlyPasskeyNativeReason.failed,
+      _ => AkedlyPasskeyNativeReason.failed,
+    };
+    return AkedlyPasskeyNativeException(
+      reason: reason,
+      message: error.message ?? 'Native passkey ceremony failed.',
+      domError: details['domError']?.toString(),
+      platformCode: details['platformCode']?.toString() ??
+          (reason == AkedlyPasskeyNativeReason.failed ? error.code : null),
+    );
+  }
 
   /// Build the ceremony URL: `<origin>/pk?token=…&returnUrl=<scheme>://akedly-passkey`.
   /// Pure (no platform deps) so it is unit-testable.
