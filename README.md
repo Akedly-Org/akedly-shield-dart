@@ -1,12 +1,22 @@
 # akedly_shield
 
-Client-side PoW solver, Turnstile helper, and hosted passkey ceremony launcher for Akedly Shield V1.2 (Dart/Flutter).
+Client-side PoW solver, Turnstile helper, and hosted/native passkey ceremonies for Akedly Shield V1.2 (Dart/Flutter).
 
 ## Installation
 
 ```yaml
 dependencies:
-  akedly_shield: ^1.1.0
+  akedly_shield: ^1.2.0
+```
+
+For a reproducible Git-pinned install:
+
+```yaml
+dependencies:
+  akedly_shield:
+    git:
+      url: https://github.com/Akedly-Org/akedly-shield-dart.git
+      ref: 1.2.0
 ```
 
 ## Quick Start
@@ -152,7 +162,9 @@ successful sign-in.
 >   successful sign-in be the proof. Do not gate your "passkey enabled" UI on the enroll result alone.
 
 You must register the callback scheme once on Android (the standard
-`flutter_web_auth_2` 3.x setup); iOS needs no setup.
+`flutter_web_auth_2` 4.x setup); iOS needs no setup. This SDK uses
+`flutter_web_auth_2: ^4.1.0`, which requires the public Dart 3.3 and Flutter 3.22.3 floors while
+supporting current Android plugin registration.
 
 The `callbackScheme` **must be lowercase** (`flutter_web_auth_2` validates it against
 `^[a-z][a-z\d+.-]*$`); a mixed-case scheme is rejected by the plugin and surfaces as a
@@ -392,3 +404,117 @@ server-side via `/auth-options` over the `returnUrl` query param.
 - **JavaScript**: [`@akedly/shield`](https://www.npmjs.com/package/@akedly/shield)
 - **Swift (iOS)**: [`AkedlyShield`](https://github.com/Akedly-Org/akedly-shield-swift)
 - **Kotlin (Android)**: [`com.akedly.shield`](https://github.com/Akedly-Org/akedly-shield-kotlin)
+
+## Native Passkeys (1.2.0)
+
+The SDK also exposes native platform ceremonies through an Akedly-owned method channel. Before
+calling either native options endpoint, your backend must identify the native application:
+
+```json
+{
+  "nativeApp": {
+    "platform": "ios",
+    "appId": "com.example.ios"
+  }
+}
+```
+
+Send the same `nativeApp` shape on `/auth-options` and `/register-options`. Use `"android"`
+with the Android `applicationId` on Android; an app's iOS bundle identifier and Android
+`applicationId` can differ. The backend uses this registration identity to issue native options.
+
+```dart
+import 'dart:io' show Platform;
+
+final nativeApp = Platform.isIOS
+    ? {
+        'platform': 'ios',
+        'appId': iosBundleId,
+      }
+    : {
+        'platform': 'android',
+        'appId': androidApplicationId,
+      };
+final options = await myBackend.startPasskeyAuthOptions(
+  nativeApp: nativeApp,
+);
+try {
+  final authResponse = await AkedlyPasskey.authenticate(options);
+  await myBackend.verifyPasskey(authResponse);
+} on AkedlyPasskeyNativeException catch (error) {
+  if (error.platformCode == 'busy') {
+    return;
+  }
+  if (error.reason == AkedlyPasskeyNativeReason.unsupported) {
+    final hostedToken = await myBackend.startHostedPasskeyAuth();
+    final hostedResult = await AkedlyPasskey.openCeremony(
+      token: hostedToken,
+      callbackScheme: 'myapp',
+    );
+    if (hostedResult.reason == 'busy') {
+      return;
+    }
+    if (hostedResult.verified) {
+      await myBackend.completeHostedSignIn(hostedResult);
+    } else {
+      await runOtpFallback();
+    }
+  } else {
+    await runOtpFallback();
+  }
+}
+```
+
+Use `AkedlyPasskey.register(options)` for the object returned by your backend's
+`/register-options` call. Use `AkedlyPasskey.authenticate(options)` for the object returned by
+`/auth-options`. The SDK does not make REST calls and does not contain an API key; your backend
+must send those requests and post `attResp` or `authResp` back to Akedly. Call
+`AkedlyPasskey.isNativeSupported()` before showing the native button when you want to offer the
+hosted ceremony as the unsupported-platform fallback.
+
+The native methods return the exact WebAuthn response map. The public failure reasons are
+`unsupported`, `cancelled`, `noCredential`, `invalidOptions`, and `failed`. A second native call
+while one is running returns `failed` with `platformCode: busy`; ignore that result rather than
+starting another OTP. Every other native failure, including `cancelled` and `noCredential`,
+goes to the OTP fallback. Native methods make no network calls, so there is no native
+`network` failure reason; handle network failures around your backend's options and verify calls.
+On iOS, Authentication Services reports no matching credential through the `cancelled` category.
+`PASSKEY_REPROOF_REQUIRED` is a backend response, not an SDK exception:
+request the ordinary OTP continuation with the same transaction lineage and do not start a second
+passkey ceremony. After a lost or interrupted verification, request fresh options because the
+ceremony token is single-use.
+
+### iOS setup
+
+In the Flutter Runner target, enable Associated Domains and add both entries:
+
+```text
+webcredentials:akedly.io
+webcredentials:akedly.io?mode=developer
+```
+
+Use the first entry in a release build and the developer entry for local/debug builds. Enter the
+exact Team ID and bundle identifier in the App Registration card. The registration must be
+approved and the `apple-app-site-association` document must contain the matching
+`<TEAMID>.<bundleId>` before a physical device can create or use the credential. Allow Apple's
+association-document propagation time after changes before retrying. Native support starts at
+iOS 16; excluded-credential protection uses the iOS 17.4 API when available. Build the Flutter
+plugin with Xcode 15.3 or newer; Swift Package Manager (`Package.swift`) support is deferred.
+
+### Android setup
+
+Set the Flutter application's application ID to the approved Android package name. Enter that
+application ID and the SHA-256 fingerprints for every signing identity used by the app (debug,
+upload, and Play App Signing) in the App Registration card. The Android origin is derived from
+the certificate fingerprint, so an upload fingerprint is not a substitute for the Play App
+Signing fingerprint in a Play-distributed app.
+The Digital Asset Links document at `https://akedly.io/.well-known/assetlinks.json` must be
+regenerated after the registration is approved. Allow Google's Digital Asset Links propagation
+time after changes before retrying.
+
+The native bridge uses AndroidX Credential Manager 1.6.0. Android hosts must provide
+`minSdk` 24 or newer, `compileSdk` 35 or newer, AGP 8.6 or newer, JDK 17, and a Kotlin
+2.x-capable Gradle plugin. Requiring `minSdk` 24 is a breaking host compatibility change for
+apps that previously supported Android API 21–23, including apps that only use the hosted API.
+The public Dart floors are Dart 3.3 and Flutter 3.22.3; these host build requirements do not
+raise the public Flutter floor.

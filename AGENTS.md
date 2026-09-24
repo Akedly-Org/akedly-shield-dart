@@ -7,7 +7,7 @@ Flutter/Dart client SDK for Akedly's **V1.2 secure REST API**. Three independent
 |---|---|
 | `solver.dart` | Proof-of-work solver — finds a nonce whose `sha256(challenge + ":" + nonce)` has N leading zeros |
 | `turnstile.dart` | Cloudflare Turnstile helper |
-| `passkey.dart` | Hosted V1.2 passkey ceremony at `auth.akedly.io/pk` |
+| `passkey.dart` | Hosted V1.2 passkey ceremony and native platform passkey bridge |
 
 Backend lives in a separate repo (`Akedly`). This SDK never talks to Akedly directly on the
 customer's behalf — the customer's own backend proxies, holding the API key.
@@ -23,7 +23,9 @@ flutter analyze
 `dart test` / `dart analyze` cannot resolve the package at all — the Flutter SDK is not on the plain
 Dart tool's path. `dart test` was written here until 2026-08-03 and never worked.
 
-There is **no CI in this repo**. Never claim a build or test run you did not actually see succeed.
+CI runs Flutter analysis and tests on stable. Native plugin builds and device acceptance still
+require the platform jobs and hardware described in the feature plan. Never claim a build or test
+run you did not actually see succeed.
 
 ## Conventions
 
@@ -38,11 +40,12 @@ There is **no CI in this repo**. Never claim a build or test run you did not act
 
 ## The browser requirement (non-negotiable, all platforms)
 
-The ceremony runs via **`flutter_web_auth_2`**, which delegates to the right native surface on each
-platform: **`ASWebAuthenticationSession` on iOS, a Chrome Custom Tab on Android**. Never run the
-ceremony in a `WebView` — platform passkeys will not work there. The sibling SDKs are bound by the
-same rule directly (`akedly-shield-swift` uses `ASWebAuthenticationSession`; `akedly-shield-kotlin`
-must use Custom Tabs).
+The hosted ceremony runs via **`flutter_web_auth_2`**, which delegates to the right browser surface
+on each platform: **`ASWebAuthenticationSession` on iOS, a Chrome Custom Tab on Android**. Never
+run the hosted ceremony in a `WebView` — platform passkeys will not work there. Native passkey
+registration and authentication use the Akedly-owned method channel added in 1.2.0 and call
+AuthenticationServices on iOS or Credential Manager on Android. The sibling SDKs are bound by the
+same browser/native separation.
 
 ## The cross-SDK contract (kotlin / swift / js)
 
@@ -104,25 +107,48 @@ is a documented input contract, not a code divergence to "fix".
 
   The real server-side set is `NO_PASSKEY`, `PASSKEY_DISABLED`, `INSUFFICIENT_QUOTA`,
   `BILLING_FAILED`, `CANCELLED`, `FAILED`.
-- **`flutter_web_auth_2: ^3.0.0` stays pinned — ✅ DEFERRED 2026-07-28 (OI-H).** 5.x supersedes it, but
-  the upgrade changes the very component that owns the browser handoff, the user-cancel signal, and the
-  callback capture — the three things this SDK cannot verify without **real-device QA on both iOS and
-  Android**, which is not available here. A blind bump would trade a known-working integration for an
-  unverified one on the exact path that matters most. Leave the pin alone until someone can run that QA.
-  **Do not bump it because a tool flags the version as outdated** — that is the whole reason this note
-  exists.
+- **`flutter_web_auth_2: ^4.1.0` is selected — ✅ RESOLVED 2026-09-24 (OI-H).** VERIFY proved that
+  the 3.x Android integration still imports the removed v1 Registrar and cannot build with current
+  Flutter tooling. The 4.1.0 archive removes that Registrar dependency while retaining Dart 2.15+
+  and Flutter 3.0+ compatibility, but its `web` dependency requires the Flutter-pinned `web`
+  0.5 line. VERIFY established Dart 3.3 and Flutter 3.22.3 as the smallest maintained
+  compatible floors, so this package raises its public floors as a breaking 1.2.0 change to
+  `sdk: >=3.3.0` and `flutter: >=3.22.3`; the iOS plugin target is iOS 12 and native
+  passkey support itself still checks iOS 16 at runtime.
 
-  **What the pin costs while it stands (checked 2026-07-28):** `akedly_shield` is **not published on
-  pub.dev**, so the pin blocks no customer today. But `flutter_web_auth_2` is at 5.0.3, and any app
-  already depending on `>=4` cannot co-depend on this SDK — not even as a git dependency — because
-  pub version-solving rejects it outright. The README's install snippet nonetheless tells customers to install
-  `akedly_shield: ^1.1.0` as if it were on pub. **Publishing to pub.dev is the trigger to revisit the
-  pin: do not publish with `^3.0.0` without reopening OI-H.**
+  This resolves the deferred pin decision for the hosted browser handoff without changing the
+  native passkey contract. Physical-device acceptance on iOS and Android remains required before
+  the 1.2.0 tag or pub.dev publication.
 
 ## Gotchas
+
+### Native bridge
+
+`AkedlyPasskey.register`, `authenticate`, and `isNativeSupported` use the package's
+`akedly_shield/passkey` channel. The options cross the channel as a JSON string so the native
+implementations retain the backend's WebAuthn field names. The iOS implementation ports the
+accepted AuthenticationServices mapper and the Android implementation ports the accepted
+Credential Manager 1.6.0 mapper in a package-specific namespace. Neither implementation makes a
+network request or carries an API key. Keep the native in-flight guard separate from the hosted
+`openCeremony` guard.
 
 - `flutter_web_auth_2` throws a `PlatformException` with code `CANCELED` on user dismissal; any other
   code is an integration failure. The `on PlatformException` branch of `openCeremony` makes exactly that distinction — an
   integration bug must never be reported as "the user changed their mind". Preserve it.
 - The ceremony origin is injectable so tests and QA can point at a local Auth-Gateway rather than
   production. Keep it injectable.
+
+## Release and device acceptance
+
+This section is internal release procedure and must not be copied into public package docs.
+Before tagging or publishing `1.2.0`, verify `akedly.io` as the pub.dev publisher, run
+`dart pub publish --dry-run`, and complete physical iPhone and Android acceptance against QA.
+Require TEST-STRATEGY-S10 `S10-TS-3` (the physical re-proof journey) to be recorded as PASS, not
+BLOCKED, before tagging or publishing. Resolve OI-16 with the owner before either irreversible
+step. Until OI-16 is recorded, the current `LICENSE` holder `Copyright (c) 2026 Akedly` and the
+iOS podspec author/contact `Akedly` / `developers@akedly.io` are provisional values; do not
+change them or publish while they remain provisional.
+The physical flow must show the native sheet, verify the response through the merchant backend,
+and record the expected `https://akedly.io` or `android:apk-key-hash:` origin. Any OTP, SMS,
+WhatsApp, or email used during acceptance goes only to `+201017438478`. Swift Package Manager
+(`Package.swift`) support is deferred; use the Flutter CocoaPods integration.
