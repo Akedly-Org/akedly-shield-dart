@@ -154,6 +154,14 @@ internal fun mapCredentialFailure(error: Throwable): AkedlyPasskeyNativeExceptio
         is CreateCredentialCancellationException,
         is GetCredentialCancellationException -> AkedlyPasskeyNativeException.Reason.CANCELLED
 
+        is CreatePublicKeyCredentialDomException ->
+            if (error.domError is NotAllowedError) AkedlyPasskeyNativeException.Reason.CANCELLED
+            else AkedlyPasskeyNativeException.Reason.FAILED
+
+        is GetPublicKeyCredentialDomException ->
+            if (error.domError is NotAllowedError) AkedlyPasskeyNativeException.Reason.CANCELLED
+            else AkedlyPasskeyNativeException.Reason.FAILED
+
         is NoCredentialException -> AkedlyPasskeyNativeException.Reason.NO_CREDENTIAL
 
         is CreateCredentialProviderConfigurationException,
