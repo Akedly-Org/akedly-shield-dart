@@ -53,7 +53,12 @@ import com.google.android.gms.common.ConnectionResult
 import com.google.android.gms.common.GoogleApiAvailability
 import kotlin.coroutines.cancellation.CancellationException
 
-/** Describes a failure from an Android Credential Manager passkey ceremony. */
+/**
+ * Describes a failure from an Android Credential Manager passkey ceremony.
+ *
+ * @property domError the WebAuthn DOM error name when the credential provider rejected the
+ *   ceremony, including `NotAllowedError` when [reason] is [Reason.CANCELLED]
+ */
 class AkedlyPasskeyNativeException(
     val reason: Reason,
     message: String,
