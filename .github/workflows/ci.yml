@@ -26,3 +26,117 @@ jobs:
       - run: flutter analyze --no-fatal-infos
 
       - run: flutter test
+
+  plugin-android:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        flutter: [stable, '3.22.3']
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: ${{ matrix.flutter == 'stable' && 'stable' || '' }}
+          flutter-version: ${{ matrix.flutter != 'stable' && matrix.flutter || '' }}
+
+      - uses: actions/setup-java@v4
+        if: matrix.flutter == '3.22.3'
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - run: |
+          host_dir="${RUNNER_TEMP}/akedly_shield_android_host"
+          flutter create --platforms=android "$host_dir"
+          if [ "${{ matrix.flutter }}" = "3.22.3" ]; then
+            wrapper_properties="$host_dir/android/gradle/wrapper/gradle-wrapper.properties"
+            if [ -f "$host_dir/android/build.gradle" ]; then
+              host_build_gradle="$host_dir/android/build.gradle"
+            else
+              host_build_gradle="$host_dir/android/build.gradle.kts"
+            fi
+            if [ -f "$host_dir/android/settings.gradle" ]; then
+              host_settings_gradle="$host_dir/android/settings.gradle"
+            else
+              host_settings_gradle="$host_dir/android/settings.gradle.kts"
+            fi
+            if [ -f "$host_dir/android/app/build.gradle" ]; then
+              app_build_gradle="$host_dir/android/app/build.gradle"
+              app_build_is_kotlin=false
+            else
+              app_build_gradle="$host_dir/android/app/build.gradle.kts"
+              app_build_is_kotlin=true
+            fi
+            sed -i -E 's#gradle-[0-9.]+-(all|bin)\.zip#gradle-8.7-\1.zip#' "$wrapper_properties"
+            sed -i -E "s#com\.android\.tools\.build:gradle:[^']+#com.android.tools.build:gradle:8.6.1#" "$host_build_gradle"
+            sed -i -E "s#ext\.kotlin_version[[:space:]]*=[[:space:]]*'[^']+'#ext.kotlin_version = '2.1.20'#" "$host_build_gradle"
+            sed -i -E 's#id "com\.android\.application" version "[^"]+"#id "com.android.application" version "8.6.1"#' "$host_settings_gradle"
+            sed -i -E 's#id "org\.jetbrains\.kotlin\.android" version "[^"]+"#id "org.jetbrains.kotlin.android" version "2.1.20"#' "$host_settings_gradle"
+            sed -i -E "s#id 'com\.android\.application' version '[^']+'#id 'com.android.application' version '8.6.1'#" "$host_settings_gradle"
+            sed -i -E "s#id 'org\.jetbrains\.kotlin\.android' version '[^']+'#id 'org.jetbrains.kotlin.android' version '2.1.20'#" "$host_settings_gradle"
+            sed -i -E 's#^[[:space:]]*compileSdk(Version)?([[:space:]]*=[[:space:]]*|[[:space:]]+).*$#    compileSdk = 35#' "$app_build_gradle"
+            if ! grep -Eq '^[[:space:]]*compileSdk([[:space:]]|=)' "$app_build_gradle"; then
+              sed -i -E '0,/^[[:space:]]*android[[:space:]]*\{/s//android {\n    compileSdk = 35/' "$app_build_gradle"
+            fi
+            if [ "$app_build_is_kotlin" = true ]; then
+              sed -i -E 's#^[[:space:]]*minSdk(Version)?([[:space:]]*=[[:space:]]*|[[:space:]]+).*$#        minSdk = 24#' "$app_build_gradle"
+              if ! grep -Eq '^[[:space:]]*minSdk([[:space:]]*=[[:space:]]*|[[:space:]]+)' "$app_build_gradle"; then
+                if ! grep -Eq '^[[:space:]]*defaultConfig[[:space:]]*\{' "$app_build_gradle"; then
+                  echo 'Generated Kotlin Android app is missing defaultConfig' >&2
+                  exit 1
+                fi
+                sed -i -E '0,/^[[:space:]]*defaultConfig[[:space:]]*\{/s//defaultConfig {\n        minSdk = 24/' "$app_build_gradle"
+              fi
+            else
+              sed -i -E 's#^[[:space:]]*minSdk(Version)?([[:space:]]*=[[:space:]]*|[[:space:]]+).*$#        minSdkVersion 24#' "$app_build_gradle"
+              if ! grep -Eq '^[[:space:]]*minSdkVersion([[:space:]]|$)' "$app_build_gradle"; then
+                if ! grep -Eq '^[[:space:]]*defaultConfig[[:space:]]*\{' "$app_build_gradle"; then
+                  echo 'Generated Groovy Android app is missing defaultConfig' >&2
+                  exit 1
+                fi
+                sed -i -E '0,/^[[:space:]]*defaultConfig[[:space:]]*\{/s//defaultConfig {\n        minSdkVersion 24/' "$app_build_gradle"
+              fi
+            fi
+            sed -i 's#JavaVersion.VERSION_1_8#JavaVersion.VERSION_17#g' "$app_build_gradle"
+            sed -i -E "s#jvmTarget[[:space:]]*=[[:space:]]*['\"]1\.8['\"]#jvmTarget = '17'#" "$app_build_gradle"
+          fi
+          cd "$host_dir"
+          flutter pub add akedly_shield --path "${GITHUB_WORKSPACE}"
+          flutter build apk --debug
+
+  plugin-ios:
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        flutter: [stable, '3.22.3']
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: ${{ matrix.flutter == 'stable' && 'stable' || '' }}
+          flutter-version: ${{ matrix.flutter != 'stable' && matrix.flutter || '' }}
+
+      - run: |
+          host_dir="${RUNNER_TEMP}/akedly_shield_ios_host"
+          flutter create --platforms=ios "$host_dir"
+          cd "$host_dir"
+          flutter pub add akedly_shield --path "${GITHUB_WORKSPACE}"
+          if [ "${{ matrix.flutter }}" = "3.22.3" ]; then
+            flutter pub get
+            cd ios
+            pod install
+            xcodebuild \
+              -workspace Runner.xcworkspace \
+              -scheme Runner \
+              -configuration Debug \
+              -sdk iphonesimulator \
+              CODE_SIGNING_ALLOWED=NO \
+              CODE_SIGNING_REQUIRED=NO \
+              build
+          else
+            flutter build ios --debug --no-codesign
+          fi

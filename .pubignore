@@ -1,0 +1,13 @@
+# Match the repository exclusions because .pubignore replaces .gitignore for pub packaging.
+.dart_tool/
+.packages
+build/
+doc/api/
+.flutter-plugins-dependencies
+pubspec.lock
+.DS_Store
+android/.gradle/
+android/local.properties
+ios/.symlinks/
+ios/Pods/
+AGENTS.md

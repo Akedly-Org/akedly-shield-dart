@@ -13,3 +13,8 @@ doc/api/
 pubspec.lock
 
 .DS_Store
+
+android/.gradle/
+android/local.properties
+ios/.symlinks/
+ios/Pods/
