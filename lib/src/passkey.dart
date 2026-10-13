@@ -44,12 +44,13 @@ class AkedlyPasskeyResult {
   });
 }
 
-/// Hosted and native V1.2 passkey ceremonies for Flutter (iOS + Android).
+/// Hosted V1.2 passkey ceremony for Flutter (iOS + Android).
 ///
-/// Hosted ceremonies run in a system authentication session
-/// (`ASWebAuthenticationSession` on iOS, a Custom Tab on Android, via
-/// `flutter_web_auth_2`) on the akedly.io origin and return through a deep link.
-/// They do not require an embedded WebView, associated domains, or Digital Asset Links.
+/// The ceremony runs in a system authentication session (`ASWebAuthenticationSession`
+/// on iOS, a Custom Tab on Android, via `flutter_web_auth_2`) on the akedly.io
+/// origin — so platform passkeys (Face ID / Touch ID / fingerprint / device PIN)
+/// work — and returns the result through a deep link to your app's custom scheme.
+/// No embedded WebView, no associated-domains / Digital Asset Links setup.
 ///
 /// Native registration and authentication use the Akedly-owned method channel to call
 /// Authentication Services or Credential Manager directly. Native methods make no network
@@ -182,7 +183,8 @@ class AkedlyPasskey {
     } on JsonUnsupportedObjectError catch (error) {
       throw AkedlyPasskeyNativeException(
         reason: AkedlyPasskeyNativeReason.invalidOptions,
-        message: error.toString(),
+        message:
+            'Unsupported native passkey option type: ${error.unsupportedObject.runtimeType}.',
       );
     } on TypeError catch (error) {
       throw AkedlyPasskeyNativeException(

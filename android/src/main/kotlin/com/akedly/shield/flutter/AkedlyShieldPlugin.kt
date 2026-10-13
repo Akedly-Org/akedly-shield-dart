@@ -18,7 +18,6 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlin.coroutines.cancellation.CancellationException
 
-/** Flutter plugin registration for the Akedly native passkey bridge. */
 class AkedlyShieldPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandler {
     private var channel: MethodChannel? = null
     private var activity: Activity? = null
@@ -114,13 +113,12 @@ class AkedlyShieldPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCal
         }
         activeResult = result
         activeJob = scope.launch {
-            try {
-                val response = if (authenticate) {
+            val response = try {
+                if (authenticate) {
                     nativeAuthenticate(currentActivity, optionsJson)
                 } else {
                     nativeRegister(currentActivity, optionsJson)
                 }
-                finishSuccess(response)
             } catch (error: CancellationException) {
                 finishError(
                     AkedlyPasskeyNativeException(
@@ -129,9 +127,12 @@ class AkedlyShieldPlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCal
                         cause = error
                     )
                 )
+                return@launch
             } catch (error: Throwable) {
                 finishError(mapCredentialFailure(error))
+                return@launch
             }
+            finishSuccess(response)
         }
     }
 

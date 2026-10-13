@@ -2,12 +2,10 @@ import AuthenticationServices
 import Flutter
 import Foundation
 
-/// Flutter bridge for the Akedly native passkey ceremony.
 public final class AkedlyShieldPlugin: NSObject, FlutterPlugin {
     private var channel: FlutterMethodChannel?
     private var activeCoordinator: AnyObject?
 
-    /// Registers the plugin's method channel with Flutter.
     public static func register(with registrar: FlutterPluginRegistrar) {
         let channel = FlutterMethodChannel(
             name: "akedly_shield/passkey",
